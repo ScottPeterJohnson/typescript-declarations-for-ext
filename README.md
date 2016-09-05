@@ -6,7 +6,8 @@ It adds short inline documentation to fields and methods and configuration inter
 Pre-generated declaration files
 ===============================
 
-There is a selection of pre-generated declarations files in the declarations folder. Make an issue if you would like to see another one, or generate it yourself (see below).
+Check the releases tab.
+Make an issue if you would like to see another one, or generate it yourself (see below).
 
 
 Generating your own declaration file
