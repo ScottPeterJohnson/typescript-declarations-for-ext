@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "target": "es6",
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true,
+        "noImplicitAny": true,
+		"suppressImplicitAnyIndexErrors": true,
+		"baseUrl": "src/",
+		"outDir": "node_modules"
+    },
+    "compileOnSave": true,
+    "buildOnSave": false,
+	"exclude": ["node_modules","build"]
+}

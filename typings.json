@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "typedjson": "npm:typedjson"
+  },
+  "globalDependencies": {
+    "jsesc": "registry:dt/jsesc#0.4.3+20160317120654",
+    "node": "registry:env/node#6.0.0+20160813135048",
+    "shelljs": "registry:dt/shelljs#0.0.0+20160526131156"
+  }
+}
