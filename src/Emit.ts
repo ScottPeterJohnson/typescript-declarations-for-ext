@@ -210,7 +210,7 @@ export class Emitter {
 
 	emit(): string {
 		let header = '// Ext type declarations (Typescript 1.4 or newer) generated on ' + new Date() + '\n';
-		header += '// For more information, see: https://github.com/Dretch/typescript-declarations-for-ext\n';
+		header += '// For more information, see: https://github.com/ScottPeterJohnson/typescript-declarations-for-ext\n';
 
 		let declarationText = this.extVersion.modules.map(this.emitModule, this).join("\n");
 
