@@ -1,7 +1,7 @@
 /**
  * This script generates the default declaration files.
  *
- * It requires these external programs: tsc, wget, unzip and jsduck  (https://github.com/senchalabs/jsduck)
+ * It requires these external programs: wget, unzip and jsduck  (https://github.com/senchalabs/jsduck)
  */
 import fs = require('fs');
 import shelljs = require('shelljs');
