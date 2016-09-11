@@ -1,4 +1,4 @@
-import { ExtVersion, Class, Member, Module } from "./JsDuck";
+import { ExtVersion, Class, Member, Module, Param } from "./JsDuck";
 import jsesc = require('jsesc');
 
 /**
@@ -20,12 +20,92 @@ function escapeParamName(name: string):string {
 	return keyword ? (name + '_') : name;
 }
 
-
-
-
 export class Emitter {
 	constructor(public extVersion: ExtVersion) { }
 
+	jsGlobalsToAlias : Set<String> = new Set();
+	currentModule : Module;
+	currentModuleClassBaseNames : Set<string>;
+
+	convertFromExtType(senchaType: string,
+						properties?: Param[]):string {
+		let SPECIAL_CASE_TYPE_MAPPINGS = {
+			'*': 'any',
+			'Arguments': 'any',
+			'Array': 'any[]',
+			'boolean': 'boolean',
+			'Boolean': 'boolean',
+			'CSSStyleSheet': 'CSSStyleSheet',
+			'CSSStyleRule': 'CSSStyleRule',
+			'Date': 'Date',
+			'Error': 'Error',
+			'Event': 'Event',
+			'Function': 'Function',
+			'HtmlElement': 'HTMLElement',
+			'HTMLElement': 'HTMLElement',
+			'null': 'void',
+			'number': 'number',
+			'Number': 'number',
+			'NodeList': 'NodeList',
+			'Mixed': 'any',
+			'Object': 'any',
+			'RegExp': 'RegExp',
+			'string': 'string',
+			'String': 'string',
+			'TextNode': 'Text',
+			'undefined': 'void',
+			'XMLElement': 'any',
+			'Window': 'Window'
+		};
+
+		let mapSubType = (typ:string, needsBracket:boolean) => {
+			let arrays = /(\[])*$/.exec(typ)[0];
+			if (arrays) {
+				typ = typ.substring(0, typ.length - arrays.length);
+			}
+
+			if (typ === 'Function' && properties) {
+				// if no return type is specified, assume any - it is not safe to assume void
+				let params : Array<string> = [];
+				let retTyp = 'any';
+				for(let property of properties){
+					if (property.name === 'return') {
+						retTyp = this.convertFromExtType(property.type, property.properties);
+					} else {
+						let opt = property.optional ? '?' : '';
+						let typ = this.convertFromExtType(property.type, property.properties);
+						params.push(property.name + opt + ': ' + typ);
+					}
+				}
+
+				let fnType = '(' + params.join(', ') + ') => ' + retTyp;
+				return ( (needsBracket || arrays) ? ('(' + fnType + ')') : fnType) + arrays;
+			} else if(typ.startsWith('"') && typ.endsWith('"')) {
+				return typ; //A string literal type; supported in later versions of Typescript
+			} else if (SPECIAL_CASE_TYPE_MAPPINGS.hasOwnProperty(typ)) {
+				let jsType = SPECIAL_CASE_TYPE_MAPPINGS[typ];
+				if(this.currentModuleClassBaseNames.has(jsType)){
+					this.jsGlobalsToAlias.add(jsType);
+					jsType = "Js" + jsType;
+				}
+				return jsType + arrays;
+			} else {
+				let cls = this.extVersion.lookupClass(typ);
+				if(!cls){
+					console.warn('Warning: unable to find class, using "any" instead: "' + typ + '". Sencha type: \"' + senchaType + '\"');
+					return 'any';
+				}
+				// enum types (e.g. Ext.enums.Widget) need special handling
+				return (cls.enum ? this.convertFromExtType(cls.enum.type) : cls.name) + arrays;
+			}
+		}
+
+		//Multiple types may be delineated by | or /
+		let subTypes = senchaType.replace(/ /g, '').split(/[|\/]/);
+		let mappedSubTypes = subTypes.map( (typ)=>mapSubType(typ, subTypes.length > 1) );
+
+		return mappedSubTypes.join('|');
+	}
 	// Whether the visibility rules say we should emit this member
 	isMemberVisible(cls: Class, member: Member):boolean {
 		return member.protected ? (!cls.singleton && !member.static) : !member.private;
@@ -49,17 +129,17 @@ export class Emitter {
 		return member.tagname === "method" && member.name === "constructor";
 	}
 
-
-
 	shouldEmitMember(cls : Class, member : Member) : boolean {
 		let isConstructor = this.isConstructor(member);
 		if (cls.singleton && (member.static || isConstructor || !this.isMemberVisible(cls, member))) {
 			return false;
 		// Don't repeat inherited members, because they are already in the parent class
 		// Ext sometimes has overrides with incompatible types too, which is weird.
-		} else if ((!this.isMemberVisible(cls, member) && !isConstructor) || this.doesParentEmitMember(cls, member.name, member.static)){
-			return false;
-		}
+	} else if (isConstructor){ //Always emit the new constructor.
+		return true;
+	}else if (!this.isMemberVisible(cls, member) || this.doesParentEmitMember(cls, member.name, member.static)){
+		return false;
+	}
 		return true;
 	}
 
@@ -82,14 +162,19 @@ export class Emitter {
 	* Construct a configuration object literal type for a constructor that accepts configuration.
 	*/
 	constructConfigurationInterface(cls : Class) : string {
+		let willExtend = cls.extends && this.doesParentEmitMember(cls, "constructor", false);
 		let memberTxt = cls.members.map((member)=>{
 			if(member.tagname === "cfg"){
-				let cfgType = this.extVersion.convertFromExtType(member.type);
+				let cfgType = this.convertFromExtType(member.type);
+				if(willExtend && this.doesParentEmitMember(cls, member.name, false)){
+					return null;
+				}
 				let optional = member.required ? '' : '?';
 				return quoteProperty(member.name) + optional + ': ' + cfgType;
 			} else { return null; }
 		}).filter((txt)=>txt).join(",\n");
-		return 'interface ' + this.getConfigName(cls) + '{\n' + memberTxt + '\n}\n';
+		let extend = willExtend ? (" extends " + this.extVersion.normalizeClassName(cls.extends) + "Config ") : "";
+		return 'interface ' + this.getConfigName(cls) + extend + '{\n' + memberTxt + '\n}\n';
 	}
 
 	emitMember(cls: Class, member: Member): string {
@@ -109,16 +194,16 @@ export class Emitter {
 			let typ: string;
 			let configTag = this.extVersion.lookupMember(cls, member.name, ['cfg']);
 			if (!cls.singleton && configTag) {
-				typ = this.extVersion.convertFromExtType(configTag.type + '|' + member.type);
+				typ = this.convertFromExtType(configTag.type + '|' + member.type);
 			} else {
-				typ = this.extVersion.convertFromExtType(member.type);
+				typ = this.convertFromExtType(member.type);
 			}
 
 			return doc + staticStr + quoteProperty(member.name) + optional + ": " + typ + ';';
 		} else if (member.tagname === 'method') {
 			let params: Array<string> = [];
 			let prevParamNames = {};
-			let returnType = member.return ? this.extVersion.convertFromExtType(member.return.type, member.return.properties) : 'void';
+			let returnType = member.return ? this.convertFromExtType(member.return.type, member.return.properties) : 'void';
 			let returnString = isConstructor ? '' : ':' + returnType;
 			let optional = false;
 
@@ -160,7 +245,7 @@ export class Emitter {
 				if (isConstructor && param.name === "config") {
 					typ = this.getConfigName(cls);
 				} else {
-					typ = this.extVersion.convertFromExtType(typ, param.properties);
+					typ = this.convertFromExtType(typ, param.properties);
 				}
 
 				params.push(paramName + (optional ? '?' : '') + ": " + typ);
@@ -172,7 +257,7 @@ export class Emitter {
 				return ''; // we will emit the method/property tag instead
 			}
 			if (!cls.singleton) {
-				var typ = this.extVersion.convertFromExtType(member.type);
+				var typ = this.convertFromExtType(member.type);
 				return doc + staticStr + quoteProperty(member.name) + ': ' + typ + ';';
 			}
 		}
@@ -192,13 +277,19 @@ export class Emitter {
 		}
 
 		let extend = (!cls.singleton && normalizedParent) ? (' extends ' + normalizedParent) : '';
-		let declarationStart = (this.getModuleName(cls) ? 'export' : 'declare ') + ' class ' + rootName + extend + ' {';
+		let declarationStart = (this.getModuleName(cls) ? 'export' : 'declare ') + ' class ' + rootName + extend + ' {\n';
 		let memberDeclarations = cls.members.map((member : Member)=> this.emitMember(cls, member), this);
 		let declarationEnd = '}';
 		return constructorConfigurationInterface + doc + declarationStart + memberDeclarations.filter((decl)=>decl).join("\n") + declarationEnd;
 	}
 
 	emitModule(module: Module): string {
+		this.currentModule = module;
+		this.currentModuleClassBaseNames = new Set();
+		for(let cls of module.classes){
+				this.currentModuleClassBaseNames.add(this.getClassBaseName(cls));
+		}
+
 		let moduleStart = 'declare namespace ' + module.name + ' {';
 		let containedClasses = module.classes.map(this.emitClass, this).join("\n");
 		if(module.name){
@@ -209,11 +300,11 @@ export class Emitter {
 	}
 
 	emit(): string {
-		let header = '// Ext type declarations (Typescript 1.4 or newer) generated on ' + new Date() + '\n';
+		let header = '// Ext type declarations (Typescript 1.8 or newer) generated on ' + new Date() + '\n';
 		header += '// For more information, see: https://github.com/ScottPeterJohnson/typescript-declarations-for-ext\n';
 
 		let declarationText = this.extVersion.modules.map(this.emitModule, this).join("\n");
-
-		return header + declarationText;
+		let jsGlobals = [...this.jsGlobalsToAlias].map((global)=>"type Js" + global + " = " + global +";\n").join("");
+		return header + jsGlobals + declarationText;
 	}
 }

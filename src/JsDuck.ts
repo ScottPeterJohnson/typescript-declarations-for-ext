@@ -44,7 +44,6 @@ export interface Module {
 	classes: Class[];
 }
 
-
 export class ExtVersion {
     constructor(private inputDir: string, public docUrl : string) {
 		this.read();
@@ -72,81 +71,6 @@ export class ExtVersion {
 	public normalizeClassName(name: string):(string|null) {
 		let cls = this.lookupClass(name);
 		return cls && cls.name;
-	}
-
-	public convertFromExtType(senchaType: string,
-						properties?: Param[]):string {
-		let SPECIAL_CASE_TYPE_MAPPINGS = {
-			'*': 'any',
-			'Arguments': 'any',
-			'Array': 'any[]',
-			'boolean': 'boolean',
-			'Boolean': 'boolean',
-			'CSSStyleSheet': 'CSSStyleSheet',
-			'CSSStyleRule': 'CSSStyleRule',
-			'Date': 'Date',
-			'Error': 'Error',
-			'Event': 'Event',
-			'Function': 'Function',
-			'HtmlElement': 'HTMLElement',
-			'HTMLElement': 'HTMLElement',
-			'null': 'void',
-			'number': 'number',
-			'Number': 'number',
-			'NodeList': 'NodeList',
-			'Mixed': 'any',
-			'Object': 'any',
-			'RegExp': 'RegExp',
-			'string': 'string',
-			'String': 'string',
-			'TextNode': 'Text',
-			'undefined': 'void',
-			'XMLElement': 'any',
-			'Window': 'Window'
-		};
-
-		let mapSubType = (typ:string, needsBracket:boolean) => {
-			let arrays = /(\[])*$/.exec(typ)[0];
-			if (arrays) {
-				typ = typ.substring(0, typ.length - arrays.length);
-			}
-
-			if (typ === 'Function' && properties) {
-				// if no return type is specified, assume any - it is not safe to assume void
-				let params : Array<string> = [];
-				let retTyp = 'any';
-				for(let property of properties){
-					if (property.name === 'return') {
-						retTyp = this.convertFromExtType(property.type, property.properties);
-					} else {
-						let opt = property.optional ? '?' : '';
-						let typ = this.convertFromExtType(property.type, property.properties);
-						params.push(property.name + opt + ': ' + typ);
-					}
-				}
-
-				let fnType = '(' + params.join(', ') + ') => ' + retTyp;
-				return ( (needsBracket || arrays) ? ('(' + fnType + ')') : fnType) + arrays;
-			} else if(typ.startsWith('"') && typ.endsWith('"')) {
-				return typ; //A string literal type; supported in later versions of Typescript
-			} else if (SPECIAL_CASE_TYPE_MAPPINGS.hasOwnProperty(typ)) {
-				return SPECIAL_CASE_TYPE_MAPPINGS[typ] + arrays;
-			} else {
-				let cls = this.lookupClass(typ);
-				if(!cls){
-					console.warn('Warning: unable to find class, using "any" instead: "' + typ + '". Sencha type: \"' + senchaType + '\"');
-					return 'any';
-				}
-				// enum types (e.g. Ext.enums.Widget) need special handling
-				return (cls.enum ? this.convertFromExtType(cls.enum.type) : cls.name) + arrays;
-			}
-		}
-
-		//Multiple types may be delineated by | or /
-		let subTypes = senchaType.replace(/ /g, '').split(/[|\/]/);
-		let mappedSubTypes = subTypes.map( (typ)=>mapSubType(typ, subTypes.length > 1) );
-
-		return mappedSubTypes.join('|');
 	}
 
     /**
